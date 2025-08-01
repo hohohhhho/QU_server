@@ -7,12 +7,6 @@
 #include <QUdpSocket>
 #include <QMutex>
 
-QT_BEGIN_NAMESPACE
-namespace Ui {
-class MainWindow;
-}
-QT_END_NAMESPACE
-
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
@@ -47,7 +41,6 @@ private:
         quint16 port;
     };
 
-    Ui::MainWindow *ui;
     QTcpServer* server;
     QUdpSocket* socket_udp_server;
 

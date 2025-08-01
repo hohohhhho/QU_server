@@ -1,15 +1,26 @@
 #include "mainwindow.h"
-#include "ui_mainwindow.h"
 #include <QSqlDatabase>
 #include <QSqlQuery>
 #include <QSqlError>
+#include <QSystemTrayIcon>
+#include <QMenu>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
-    , ui(new Ui::MainWindow)
 {
-    ui->setupUi(this);
     this->setWindowTitle("服务器1.3");
+    //托盘界面
+    {
+        QSystemTrayIcon* tray = new QSystemTrayIcon(this);
+        QMenu* menu = new QMenu(this);
+        tray->show();
+        QAction* action_exit = new QAction(menu);
+        tray->setContextMenu(menu);
+        menu->addAction(action_exit);
+        connect(action_exit,&QAction::triggered,this,[=](){
+            this->close();
+        });
+    }
 
     this->server=new QTcpServer(this);
     this->socket_udp_server = new QUdpSocket(this);
@@ -127,7 +138,6 @@ MainWindow::~MainWindow()
 {
     QSqlDatabase::removeDatabase("register");
     qDeleteAll(map_to_tcp);
-    delete ui;
 }
 
 QByteArray MainWindow::readSocket(QTcpSocket *socket)
@@ -135,7 +145,7 @@ QByteArray MainWindow::readSocket(QTcpSocket *socket)
     // static QHash<QTcpSocket*, quint32> expectedSizes;  // 保存待接收数据长度
 
     // QDataStream in(socket);
-    // in.setVersion(QDataStream::Qt_6_8);  // 必须与发送方一致
+    // in.setVersion(QDataStream::Qt_5_15);  // 必须与发送方一致
 
     // if (!expectedSizes.contains(socket)) {
     //     if (socket->bytesAvailable() < static_cast<qint32>(sizeof(quint32)))
@@ -163,7 +173,7 @@ QByteArray MainWindow::readSocket(QTcpSocket *socket)
     }
     buffers[socket]+=socket->readAll();
     QDataStream in(&buffers[socket],QIODevice::ReadOnly);
-    in.setVersion(QDataStream::Qt_6_8);
+    in.setVersion(QDataStream::Qt_5_15);
     in.startTransaction();
 
     QByteArray content;
@@ -448,7 +458,7 @@ void MainWindow::sendMsg(QTcpSocket *socket, const QByteArray &content, const ch
 
     QByteArray data;//临时数据存储
     QDataStream out(&data,QIODevice::WriteOnly);//创建数据流写入data
-    // out.setVersion(QDataStream::Qt_6_8);
+    // out.setVersion(QDataStream::Qt_5_15);
     // out<<quint64(0)<<'/'+style_head+content;
     // out.device()->seek(0);
     // out<<out.device()->size()-sizeof(quint64);
@@ -511,7 +521,7 @@ void MainWindow::sqlQuery(QTcpSocket *socket,QByteArray data)
             auto errorFunc=[=](){
                 QByteArray buffer;
                 QDataStream out(&buffer,QIODevice::WriteOnly);
-                out.setVersion(QDataStream::Qt_6_8);
+                out.setVersion(QDataStream::Qt_5_15);
                 out<<QByteArray()<<QByteArray();
                 socket->write(buffer);
             };
@@ -531,7 +541,7 @@ void MainWindow::sqlQuery(QTcpSocket *socket,QByteArray data)
 
                     QByteArray buffer;//临时数据存储
                     QDataStream out(&buffer,QIODevice::WriteOnly);//创建数据流写入data
-                    out.setVersion(QDataStream::Qt_6_8);
+                    out.setVersion(QDataStream::Qt_5_15);
                     out<<data<<content;
                     socket->write(buffer);
                     // sendMsg(socket,content,'s');
@@ -555,7 +565,7 @@ void MainWindow::sqlQuery(QTcpSocket *socket,QByteArray data)
             auto errorFunc=[=](){
                 QByteArray buffer;
                 QDataStream out(&buffer,QIODevice::WriteOnly);
-                out.setVersion(QDataStream::Qt_6_8);
+                out.setVersion(QDataStream::Qt_5_15);
                 out<<QByteArray()<<QByteArray();
                 socket->write(buffer);
             };
@@ -575,7 +585,7 @@ void MainWindow::sqlQuery(QTcpSocket *socket,QByteArray data)
 
                     QByteArray buffer;//临时数据存储
                     QDataStream out(&buffer,QIODevice::WriteOnly);//创建数据流写入data
-                    out.setVersion(QDataStream::Qt_6_8);
+                    out.setVersion(QDataStream::Qt_5_15);
                     out<<data<<content;
                     socket->write(buffer);
                 }else{
