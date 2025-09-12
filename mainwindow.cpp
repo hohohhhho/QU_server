@@ -4,23 +4,28 @@
 #include <QSqlError>
 #include <QSystemTrayIcon>
 #include <QMenu>
+#include <QApplication>
+#include <QFile>
+#include <QCryptographicHash>
+#include <QFileInfo>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
 {
-    this->setWindowTitle("服务器1.3");
+    this->setWindowTitle("服务器1.3.2");
+    QApplication::setApplicationVersion("1.3.3");
     //托盘界面
-    {
-        QSystemTrayIcon* tray = new QSystemTrayIcon(this);
-        QMenu* menu = new QMenu(this);
-        tray->show();
-        QAction* action_exit = new QAction(menu);
-        tray->setContextMenu(menu);
-        menu->addAction(action_exit);
-        connect(action_exit,&QAction::triggered,this,[=](){
-            this->close();
-        });
-    }
+    // {
+    //     QSystemTrayIcon* tray = new QSystemTrayIcon(this);
+    //     QMenu* menu = new QMenu(this);
+    //     tray->show();
+    //     QAction* action_exit = new QAction(menu);
+    //     tray->setContextMenu(menu);
+    //     menu->addAction(action_exit);
+    //     connect(action_exit,&QAction::triggered,this,[=](){
+    //         this->close();
+    //     });
+    // }
 
     this->server=new QTcpServer(this);
     this->socket_udp_server = new QUdpSocket(this);
@@ -142,30 +147,6 @@ MainWindow::~MainWindow()
 
 QByteArray MainWindow::readSocket(QTcpSocket *socket)
 {
-    // static QHash<QTcpSocket*, quint32> expectedSizes;  // 保存待接收数据长度
-
-    // QDataStream in(socket);
-    // in.setVersion(QDataStream::Qt_5_15);  // 必须与发送方一致
-
-    // if (!expectedSizes.contains(socket)) {
-    //     if (socket->bytesAvailable() < static_cast<qint32>(sizeof(quint32)))
-    //         return QByteArray();  // 数据不足，等待下次
-
-    //     in >> expectedSizes[socket];  // 读取8字节长度头
-    // }
-
-    // // 阶段2：检查数据体是否完整
-    // if (socket->bytesAvailable() < static_cast<qint32>(expectedSizes[socket]))
-    //     return QByteArray();  // 数据不足，等待下次
-
-    // // 阶段3：读取实际内容（不含长度头）
-    // QByteArray content;
-    // in>>content;
-    // // 清理状态
-    // expectedSizes.remove(socket);
-
-    // return content;  // 返回纯内容
-    // static QHash<QTcpSocket*, quint32> expectedSizes;
     static QHash<QTcpSocket*,QByteArray> buffers;
 
     if(buffers[socket].isEmpty()){
@@ -182,13 +163,17 @@ QByteArray MainWindow::readSocket(QTcpSocket *socket)
         buffers[socket]=buffers[socket].mid(in.device()->pos());
         // in.device()->seek(0);
     }else{
-        in.rollbackTransaction();
+        if (in.status() == QDataStream::ReadPastEnd) {
+            qDebug()<<"QDataStream正常等待更多数据";
+        }else if (in.status() == QDataStream::Ok) {
+            qDebug()<<"事务为空";
+        }else {
+            //发生错误，回滚
+            in.rollbackTransaction();
+        }
     }
 
-    // expectedSizes.remove(socket);
-
     return content;
-
 }
 
 void MainWindow::readMsg(const QByteArray &msg,QTcpSocket* socket)
@@ -209,7 +194,7 @@ void MainWindow::readMsg(const QByteArray &msg,QTcpSocket* socket)
     if(first_char=='/'){
         char second_char=data[1];
         data=data.mid(2);//移除/s/a等
-        QList<char> general={'s','a','f','d','r','i','h','u','g'};
+        QList<char> general={'s','a','f','d','i','h','u','g','v'};
         /*
         发送消息send,添加好友add,被接受好友申请（直接添加）friend,被删除好友delete
         申请视频通话request,通话时传递视频帧image,被挂断hang up
@@ -262,33 +247,14 @@ void MainWindow::readMsg(const QByteArray &msg,QTcpSocket* socket)
 
             sendMsg(id_receiver,head.append(data),second_char);
 
-        }else if(second_char=='r'){//注册register
+        }/*else if(second_char == 'r'){//注册register
 
             QString account;
             QString password;
-            int counter=0;
 
-            data=data.mid(1);//移除"*"
-            for(char& c:data){
-                if(c=='*'){
-                    data=data.mid(counter+1);//移除所有参与了计数的字符再移除“*”
-                    break;
-                }else{
-                    counter++;
-                    account.append(c);
-                }
-            }
-            counter=0;
-            data=data.mid(1);//移除"*"
-            for(char& c:data){
-                if(c=='*'){
-                    data=data.mid(counter+1);//移除所有参与了计数的字符再移除“*”
-                    break;
-                }else{
-                    counter++;
-                    password.append(c);
-                }
-            }
+            account = handleDataHead(data);
+            password = handleDataHead(data);
+            qDebug()<<"注册:密码"<<password;
 
             {
                 QSqlDatabase db = QSqlDatabase::database("register");
@@ -304,7 +270,7 @@ void MainWindow::readMsg(const QByteArray &msg,QTcpSocket* socket)
 
                     query.prepare("INSERT INTO account (account, password) VALUES (:account, :password);");
                     query.bindValue(":account", account);
-                    query.bindValue(":password", password);
+                    query.bindValue(":password", password.toUtf8());
                     if (query.exec()) {
                         // 获取自增id
                         if (query.exec("SELECT LAST_INSERT_ID();") && query.next()) {
@@ -339,7 +305,7 @@ void MainWindow::readMsg(const QByteArray &msg,QTcpSocket* socket)
                 }
             }
 
-        }else if(second_char=='l'){//登录login
+        }*/else if(second_char == 'l'){//登录login
             data.chop(1);//移除末尾的*
             data = data.mid(1);//移除头部的*
             int id = data.toInt();
@@ -353,11 +319,41 @@ void MainWindow::readMsg(const QByteArray &msg,QTcpSocket* socket)
                 QByteArray data = readSocket(socket);
                 readMsg(data,socket);
             });
-        }else if(second_char=='m'){//数据库查询MySQL,/m/login*para1**para2*
+        }else if(second_char == 'm'){//数据库查询MySQL,/m/login*para1**para2*
 
             sqlQuery(socket,data);
 
-        }else if(second_char=='p'){
+        }else if(second_char == '@'){//获取最新的软件版本
+
+            QString version = QApplication::applicationVersion();
+            sendMsg(socket,'/' + version.toUtf8(),'s');
+
+        }else if(second_char == 'z'){
+
+            QString path_packet = "F:/1.0.zip";
+            QByteArray data,filename,hash_value;
+            quint64 size;
+
+            QFile file(path_packet);
+            if(!file.open(QIODevice::ReadOnly)){
+                qDebug()<<"软件包加载失败";
+            }
+            data = file.readAll();
+            size = data.size();
+            file.close();
+
+            filename = "客户端";
+
+            QCryptographicHash hash(QCryptographicHash::Sha1);
+            hash.addData(data);
+            hash_value = hash.result().toHex();
+
+            QByteArray buffer;
+            QDataStream out(&buffer,QIODevice::WriteOnly);
+            out <<size <<filename <<data <<hash_value;
+            socket->write(buffer);
+
+        }else if(second_char == 'p'){
             int id;
             QByteArray profile;
             QDataStream in(&data,QIODevice::ReadOnly);
@@ -368,17 +364,22 @@ void MainWindow::readMsg(const QByteArray &msg,QTcpSocket* socket)
                 QSqlQuery query(db);
                 QString sql=QString("update account set profile=:profile where id=:id;");
                 query.prepare(sql);
-                query.bindValue(":profile",profile);
+                query.bindValue(":profile",profile,QSql::In | QSql::Binary);
                 query.bindValue(":id",id);
+
+                qDebug()<<"profile:"<<profile;
+
                 if(query.exec()){
                     sendMsg(socket,"",'s');
+                    while (query.next()) {}//空转清空结果集
+                    query.finish();
                 }else{
                     sendMsg(socket,"",'f');
                 }
             }else{
                 qDebug()<<"数据库打开失败";
             }
-        }else if(second_char=='q'){
+        }else if(second_char == 'q'){
             int id;
             QByteArray profile;
             QDataStream in(&data,QIODevice::ReadOnly);
@@ -482,24 +483,64 @@ void MainWindow::sqlQuery(QTcpSocket *socket,QByteArray data)
         QSqlQuery query(db);
         QString sql;
         if(type=="same_account"){
-            QString account=qstr_list[1];
-            sql=QString("select id from account where account=:account;");
+            QString account = qstr_list[1];
+            sql = QString("select id from account where account=:account;");
             query.prepare(sql);
             query.bindValue(":account",account);
             if(query.exec() && query.next()){
                 qDebug()<<"数据查询成功";
                 int id=query.value("id").toInt();
-                sendMsg(socket,QString::number(id).toUtf8(),'s');
+                sendMsg(socket,'/'+QString::number(id).toUtf8(),'s');
             }else{
                 QString error=query.lastError().text();
                 qDebug()<<"same_account sql语句执行失败"<<error;
                 sendMsg(socket,error.toUtf8(),'f');
             }
+        }else if(type=="register"){
+            QString account = qstr_list[1];
+            QString password = qstr_list[3];
+            query.prepare("select * from account where account=:account;");
+            query.bindValue(":account", account);
+            if(query.exec() && query.next()){
+                sendMsg(socket,"账号已存在",'f');
+            }
+
+            query.prepare("INSERT INTO account (account, password) VALUES (:account, :password);");
+            query.bindValue(":account", account);
+            query.bindValue(":password", password.toUtf8());
+            if (query.exec()) {
+                // 获取自增id
+                if (query.exec("SELECT LAST_INSERT_ID();") && query.next()) {
+                    int id = query.value(0).toInt();
+                    db.commit(); // 提交事务
+
+                    mutex_tcp_map.lock();
+                    map_to_tcp.insert(id,socket);
+                    mutex_tcp_map.unlock();
+
+                    QByteArray content=QString("/%1").arg(id).toUtf8();
+                    sendMsg(socket,content,'s');
+                } else {
+                    db.rollback(); // 回滚事务
+                    qWarning() << "获取自增ID失败";
+                    sendMsg(socket,"获取id失败",'f');
+                }
+            } else {
+                db.rollback(); // 回滚事务
+                qWarning()<<query.lastError().text();
+                sendMsg(socket,query.lastError().text().toUtf8(),'f');
+
+                if (query.lastError().text() == "1062") { // 唯一约束冲突
+                    qWarning()<<"账号已存在";
+                } else {
+                    qWarning()<<"插入数据失败";
+                }
+            }
         }else if(type=="login"){
-            QString account=qstr_list[1];
-            QString password=qstr_list[3];
+            QString account = qstr_list[1];
+            QString password = qstr_list[3];
             qDebug()<<"account"<<account<<"password"<<password;
-            sql=QString("select id from account where account=:account and password=:password;");
+            sql = QString("select id from account where account=:account and password=:password;");
             query.prepare(sql);
             query.bindValue(":account",account);
             query.bindValue(":password",password);
@@ -714,6 +755,16 @@ void MainWindow::sqlQuery(QTcpSocket *socket,QByteArray data)
             }else{
                 sendMsg(socket,"",'f');
             }
+        }else if(type=="like_user"){
+            int id = qstr_list[1].toInt();
+            QString sql=QString("update account set likes=likes+1 where id=:id;");
+            query.prepare(sql);
+            query.bindValue(":id",id);
+            if(query.exec()){
+                sendMsg(socket,"",'s');
+            }else{
+                sendMsg(socket,"",'f');
+            }
         }else if(type=="create_chatgroup"){
             QString name = qstr_list[1];
             int owner =  qstr_list[3].toInt();
@@ -732,6 +783,12 @@ void MainWindow::sqlQuery(QTcpSocket *socket,QByteArray data)
                     QByteArray content = "/" + QString::number(id_group).toUtf8();
                     sendMsg(socket,content,'s');
 
+                    GroupMember member;
+                    member.id = owner;
+                    member.role = 3;
+                    QList<GroupMember> members;
+                    members.append(member);
+                    this->map_to_members.insert(id_group,members);
                     qDebug()<<QString("为%1创建群聊成功,群聊id%2").arg(owner).arg(id_group);
                 }else{
                     sendMsg(socket,"",'f');
@@ -801,6 +858,80 @@ void MainWindow::sqlQuery(QTcpSocket *socket,QByteArray data)
             }else{
                 sendMsg(socket,"",'f');
             }
+        }else if(type=="dissolve_chatgroup"){
+            int id_group = qstr_list[1].toInt();
+            QString sql="delete from chatgroup where id=:id_group;";
+            query.prepare(sql);
+            query.bindValue(":id_group",id_group);
+            if(query.exec()){
+                sendMsg(socket,"",'s');
+            }else{
+                sendMsg(socket,"",'f');
+            }
+        }else if(type=="promote_member_from_chatgroup"){
+            int id_user = qstr_list[1].toInt();
+            int id_group = qstr_list[3].toInt();
+            QString sql="delete from join_group   where id_user=:id_user and id_group=:id_group;"
+                        "insert into manage_group(id_user,id_group) value(:id_user,:id_group);";
+            query.prepare(sql);
+            query.bindValue(":id_user",id_user);
+            query.bindValue(":id_group",id_group);
+            if(query.exec()){
+                GroupMember* member = findGroupMember(id_group,id_user);
+                if(member){
+                    member->role = 2;
+                    member = nullptr;
+                    sendMsg(socket,"",'s');
+                }else{
+                    sendMsg(socket,"",'f');
+                }
+            }else{
+                sendMsg(socket,"",'f');
+            }
+        }else if(type=="demote_member_from_chatgroup"){
+            int id_user = qstr_list[1].toInt();
+            int id_group = qstr_list[3].toInt();
+            QString sql="delete from manage_group   where id_user=:id_user and id_group=:id_group;"
+                        "insert into join_group(id_user,id_group) value(:id_user,:id_group);";
+            query.prepare(sql);
+            query.bindValue(":id_user",id_user);
+            query.bindValue(":id_group",id_group);
+            if(query.exec()){
+                GroupMember* member = findGroupMember(id_group,id_user);
+                if(member){
+                    member->role = 1;
+                    member = nullptr;
+                    sendMsg(socket,"",'s');
+                }else{
+                    sendMsg(socket,"",'f');
+                }
+            }else{
+                sendMsg(socket,"",'f');
+            }
+        }else if(type=="kick_member_from_chatgroup"){
+            int id_user = qstr_list[1].toInt();
+            int id_group = qstr_list[3].toInt();
+            QString sql="delete from manage_group where id_user=:id_user and id_group=:id_group;"
+                        "delete from join_group   where id_user=:id_user and id_group=:id_group;";
+            query.prepare(sql);
+            query.bindValue(":id_user",id_user);
+            query.bindValue(":id_group",id_group);
+            if(query.exec()){
+                sendMsg(socket,"",'s');
+                map_to_members[id_group].removeOne(GroupMember(id_user,1));
+            }else{
+                sendMsg(socket,"",'f');
+            }
+        }else if(type=="members_of_chatgroup"){
+            int id_group = qstr_list[1].toInt();
+            QStringList list;
+            auto members = map_to_members.value(id_group);
+            for(auto& member : members){
+                list.append(QString::number(member.id));
+                list.append(QString::number(member.role));
+            }
+            QByteArray content = '/'+list.join('/').toUtf8();
+            sendMsg(socket,content,'s');
         }else{
             qDebug()<<"未能识别的业务类型:"<<type;
             sendMsg(socket,"业务错误",'f');
@@ -830,4 +961,24 @@ QString MainWindow::handleDataHead(QByteArray &data, const QChar &split)
         }
     }
     return result;
+}
+
+MainWindow::GroupMember *MainWindow::findGroupMember(int id_group, int id_user)
+{
+    if(map_to_members.find(id_group) == map_to_members.end()){
+        qDebug()<<"findGroupMember::找不到群聊"<<id_group;
+        QStringList list;
+
+        for(auto it=map_to_members.begin(); it!=map_to_members.end(); ++it){
+            list<<QString::number(it.key());
+        }
+        qDebug()<<"map_to_members成员:"<<list;
+        return nullptr;
+    }
+    for(GroupMember& member : map_to_members[id_group]){
+        if(member.id == id_user){
+            return &member;
+        }
+    }
+    return nullptr;
 }

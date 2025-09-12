@@ -16,7 +16,7 @@ public:
     ~MainWindow();
 
     struct GroupMember{
-        GroupMember();
+        GroupMember(){};
         GroupMember(int id,int role):id(id),role(role){};
         // bool operator==(const MainWindow::GroupMember& other)const{
         //     return this->id == other.id;
@@ -34,6 +34,7 @@ public:
     void sqlQuery(QTcpSocket *socket, QByteArray data);//直接读取除了协议大小头和种类头外的部分
 
     QString handleDataHead(QByteArray &data, const QChar &split='*');
+    GroupMember* findGroupMember(int id_group,int id_user);
 
 private:
     struct UdpInfo{
