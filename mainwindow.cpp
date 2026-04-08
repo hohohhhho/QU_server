@@ -8,6 +8,7 @@
 #include <QFile>
 #include <QCryptographicHash>
 #include <QFileInfo>
+#include <QStyle>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -15,17 +16,19 @@ MainWindow::MainWindow(QWidget *parent)
     this->setWindowTitle("服务器1.3.2");
     QApplication::setApplicationVersion("1.3.3");
     //托盘界面
-    // {
-    //     QSystemTrayIcon* tray = new QSystemTrayIcon(this);
-    //     QMenu* menu = new QMenu(this);
-    //     tray->show();
-    //     QAction* action_exit = new QAction(menu);
-    //     tray->setContextMenu(menu);
-    //     menu->addAction(action_exit);
-    //     connect(action_exit,&QAction::triggered,this,[=](){
-    //         this->close();
-    //     });
-    // }
+    {
+        QSystemTrayIcon* tray = new QSystemTrayIcon(this);
+        tray->setIcon(QApplication::style()->standardIcon(QStyle::SP_ComputerIcon));
+        QMenu* menu = new QMenu(this);
+        tray->show();
+        QAction* action_exit = new QAction("关闭",menu);
+        tray->setContextMenu(menu);
+        menu->addAction(action_exit);
+        connect(action_exit,&QAction::triggered,this,[=](){
+            QApplication::quit();
+            // this->deleteLater();
+        });
+    }
 
     this->server=new QTcpServer(this);
     this->socket_udp_server = new QUdpSocket(this);
@@ -194,7 +197,7 @@ void MainWindow::readMsg(const QByteArray &msg,QTcpSocket* socket)
     if(first_char=='/'){
         char second_char=data[1];
         data=data.mid(2);//移除/s/a等
-        QList<char> general={'s','a','f','d','i','h','u','g','v'};
+        QList<char> general={'s','S','g','G','a','f','d','i','h','u','v'};
         /*
         发送消息send,添加好友add,被接受好友申请（直接添加）friend,被删除好友delete
         申请视频通话request,通话时传递视频帧image,被挂断hang up
@@ -229,7 +232,7 @@ void MainWindow::readMsg(const QByteArray &msg,QTcpSocket* socket)
                 }else{
                     qDebug()<<"数据库打开失败";
                 }
-            }else if(second_char=='g'){
+            }else if(second_char=='g' || second_char=='G'){
                 //获取收到消息的群聊的所有成员
                 int id_group = id_receiver;
                 auto list_member = map_to_members.value(id_group);
@@ -238,7 +241,7 @@ void MainWindow::readMsg(const QByteArray &msg,QTcpSocket* socket)
                         continue;//不发送给发送人
                     }
                     QByteArray head=QString("*%1**%2*").arg(id_sender).arg(id_group).toUtf8();
-                    sendMsg(member.id,head.append(data),'g');//把该群发的消息分发给所有成员
+                    sendMsg(member.id,head.append(data), second_char);//把该群发的消息分发给所有成员
                 }
                 return ;//提前返回,这个逻辑分支的id_receiver是群id，后续会将其视为用户id转发消息
             }
