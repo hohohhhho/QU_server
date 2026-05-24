@@ -9,6 +9,9 @@
 #include <QCryptographicHash>
 #include <QFileInfo>
 #include <QStyle>
+#include <QSqlRecord>
+
+#define PATH_SORFT "F:/桌面/qt项目练习/工具/仿QQ聊天工具/QU1.3/1.3.4客户端.zip"
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -49,8 +52,8 @@ MainWindow::MainWindow(QWidget *parent)
         QHostAddress address;//地址
         quint16 port;//端口
         data.resize(socket_udp_server->pendingDatagramSize());
-        socket_udp_server->readDatagram(data.data(),data.size(),&address,&port);
-        readUdpMsg(data,address,port);
+        socket_udp_server->readDatagram(data.data(), data.size(), &address, &port);
+        readUdpMsg(data, address, port);
     });
     //从数据库初始化动态表
     {
@@ -232,7 +235,7 @@ void MainWindow::readMsg(const QByteArray &msg,QTcpSocket* socket)
                 }else{
                     qDebug()<<"数据库打开失败";
                 }
-            }else if(second_char=='g' || second_char=='G'){
+            }else if(second_char == 'g' || second_char == 'G'){
                 //获取收到消息的群聊的所有成员
                 int id_group = id_receiver;
                 auto list_member = map_to_members.value(id_group);
@@ -250,65 +253,7 @@ void MainWindow::readMsg(const QByteArray &msg,QTcpSocket* socket)
 
             sendMsg(id_receiver,head.append(data),second_char);
 
-        }/*else if(second_char == 'r'){//注册register
-
-            QString account;
-            QString password;
-
-            account = handleDataHead(data);
-            password = handleDataHead(data);
-            qDebug()<<"注册:密码"<<password;
-
-            {
-                QSqlDatabase db = QSqlDatabase::database("register");
-                if (db.open()) {
-                    db.transaction(); // 开启事务
-                    QSqlQuery query(db);
-
-                    query.prepare("select * from account where account=:account;");
-                    query.bindValue(":account", account);
-                    if(query.exec() && query.next()){
-                        sendMsg(socket,"账号已存在",'f');
-                    }
-
-                    query.prepare("INSERT INTO account (account, password) VALUES (:account, :password);");
-                    query.bindValue(":account", account);
-                    query.bindValue(":password", password.toUtf8());
-                    if (query.exec()) {
-                        // 获取自增id
-                        if (query.exec("SELECT LAST_INSERT_ID();") && query.next()) {
-                            int id = query.value(0).toInt();
-                            db.commit(); // 提交事务
-
-                            mutex_tcp_map.lock();
-                            map_to_tcp.insert(id,socket);
-                            mutex_tcp_map.unlock();
-
-                            QByteArray content=QString("/%1").arg(id).toUtf8();
-                            sendMsg(socket,content,'s');
-                        } else {
-                            db.rollback(); // 回滚事务
-                            qWarning() << "获取自增ID失败";
-                            sendMsg(socket,"获取id失败",'f');
-                        }
-                    } else {
-                        db.rollback(); // 回滚事务
-                        qWarning()<<query.lastError().text();
-                        sendMsg(socket,query.lastError().text().toUtf8(),'f');
-
-                        if (query.lastError().text() == "1062") { // 唯一约束冲突
-                            qWarning()<<"账号已存在";
-                        } else {
-                            qWarning()<<"插入数据失败";
-                        }
-                    }
-                } else {
-                    qWarning()<<"数据库打开失败";
-                    sendMsg(socket,"数据库连接失败",'f');
-                }
-            }
-
-        }*/else if(second_char == 'l'){//登录login
+        }else if(second_char == 'l'){//登录login
             data.chop(1);//移除末尾的*
             data = data.mid(1);//移除头部的*
             int id = data.toInt();
@@ -333,7 +278,7 @@ void MainWindow::readMsg(const QByteArray &msg,QTcpSocket* socket)
 
         }else if(second_char == 'z'){
 
-            QString path_packet = "F:/1.0.zip";
+            QString path_packet = PATH_SORFT;
             QByteArray data,filename,hash_value;
             quint64 size;
 
@@ -413,33 +358,42 @@ void MainWindow::readMsg(const QByteArray &msg,QTcpSocket* socket)
 
 void MainWindow::readUdpMsg(QByteArray msg, QHostAddress address, quint16 port)
 {
-    if(msg.size() < 1024){
+    if(msg.size() < 128){
         qDebug()<<"收到udp消息:"<<QString::fromUtf8(msg)<<"来自ip"<<address.toString()<<"端口"<<port;
     }else{
         qDebug()<<"收到udp消息，大小："<<msg.size()<<"来自ip"<<address.toString()<<"端口"<<port;
     }
 
     QString type = handleDataHead(msg);
-    if(type == "r"){//request请求视频通话
-        int id_sender,id_receiver;
+    if(type == "r" || type == 'u'){//request请求视频通话, u同意视频通话
+        int id_sender, id_receiver;
         id_sender = handleDataHead(msg).toInt();
-        id_receiver   = handleDataHead(msg).toInt();
+        id_receiver = handleDataHead(msg).toInt();
 
         UdpInfo info;
         info.ip = address;
         info.port = port;
         map_to_udp.insert(id_sender,info);//保存该次的用户NAT至表
 
-        msg = QString("*%1*").arg(id_sender).toUtf8() + msg;
-        sendMsg(id_receiver,msg,'r');//把申请消息通过tcp转发给目标用户
+        if(type == 'r'){
+            msg = QString("*%1*").arg(id_sender).toUtf8() + msg;
+            sendMsg(id_receiver, msg, 'r');//把申请消息通过tcp转发给目标用户
+        }
+
     }else if(type == "i"){//video image 传输视频通话画面
         int receiver = handleDataHead(msg).toInt();
+
         mutex_udp_map.lock();
-        const QHostAddress& ip = map_to_udp.value(receiver).ip;
-        const quint16& port = map_to_udp.value(receiver).port;
+        auto it = map_to_udp.find(receiver);
+        if(it == map_to_udp.end()){
+            mutex_udp_map.unlock();
+            return;
+        }
+        QHostAddress ip = it->ip;
+        quint16 port = it->port;
         mutex_udp_map.unlock();
-        qDebug()<<"传输视频画面给(ip"<<ip<<",端口"<<port<<"),大小"<<msg.size();
-        socket_udp_server->writeDatagram(msg,ip,port);
+        qDebug()<<"传输视频画面给"<<receiver<<"(ip"<<ip<<",端口"<<port<<"),大小"<<msg.size();
+        socket_udp_server->writeDatagram(msg, ip, port);
     }
 }
 
@@ -596,7 +550,7 @@ void MainWindow::sqlQuery(QTcpSocket *socket,QByteArray data)
                 }
             }else{
                 QString error=query.lastError().text();
-                qDebug()<<"patch_user sql语句执行失败"<<error;
+                qDebug()<<"patch_user sql语句执行失败 sql"<<query.lastQuery()<<"error"<<error;
                 // sendMsg(socket,error.toUtf8(),'f');
                 errorFunc();
             }
@@ -935,6 +889,78 @@ void MainWindow::sqlQuery(QTcpSocket *socket,QByteArray data)
             }
             QByteArray content = '/'+list.join('/').toUtf8();
             sendMsg(socket,content,'s');
+        }else if (type == "chat_history_of_friend") {
+            int user1 = qstr_list[1].toInt();
+            int user2 = qstr_list[3].toInt();
+            // 获取两个用户之间的所有聊天记录，按时间升序排列
+            sql = "select id_sender, id_receiver, send_time, type, text, data from friend_chat_history "
+                  "where (id_sender = :u1 and id_receiver = :u2) or (id_sender = :u2 and id_receiver = :u1) "
+                  "order by send_time asc;";
+            query.prepare(sql);
+            query.bindValue(":u1", user1);
+            query.bindValue(":u2", user2);
+            if (query.exec()) {
+                // 统计数量
+                QList<QSqlRecord> records;
+                while(query.next()) {
+                    records.append(query.record());
+                }
+                int count = records.size();
+                QByteArray buffer;
+                QDataStream out(&buffer, QIODevice::WriteOnly);
+                out.setVersion(QDataStream::Qt_5_15);
+                // 发送第一个包：包含数量 "/s/count"
+                QByteArray first_packet = QString("/s/%1").arg(count).toUtf8();
+                out << first_packet;
+                // 循环发送每一条消息：一个 packet (描述信息) + 一个 data (内容)
+                for (const QSqlRecord& rec : records) {
+                    QString msg_type = rec.value("type").toString();
+                    int sender = rec.value("id_sender").toInt();
+                    int receiver = rec.value("id_receiver").toInt();
+                    QString time = rec.value("send_time").toDateTime().toString();
+                    QByteArray content = rec.value("data").toByteArray();
+
+                    // 构造描述包: /s/类型/发送者/接收者/时间
+                    QByteArray packet = QString("/s/%1/%2/%3/%4")
+                                            .arg(msg_type, QString::number(sender),
+                                                 QString::number(receiver), time).toUtf8();
+                    out << packet << content;
+                }
+                socket->write(buffer);
+                qDebug() << "已发送私聊历史记录，条数：" << count;
+            } else {
+                qDebug() << "获取私聊历史失败:" << query.lastError().text();
+                sendMsg(socket, "", 'f');
+            }
+        } else if (type == "chat_history_of_group") {
+            int group_id = qstr_list[1].toInt();
+            sql = "select id_sender, id_receiver, send_time, type, text, data from group_chat_history "
+                  "where id_receiver = :gid order by send_time asc;";
+            query.prepare(sql);
+            query.bindValue(":gid", group_id);
+            if (query.exec()) {
+                // 循环发送每条记录
+                while (query.next()) {
+                    int sender = query.value("id_sender").toInt();
+                    int receiver = query.value("id_receiver").toInt();
+                    QString time = query.value("send_time").toDateTime().toString();
+                    QString type = query.value("type").toString();
+                    QString content = query.value("data").toString();
+
+                    if (type == "text") {
+                        // 构造格式：/s/text/发送者/群ID/时间/内容
+                        QByteArray data = QString("/s/%1/%2/%3/%4/%5")
+                                              .arg(type, QString::number(sender),
+                                                   QString::number(receiver), time, content).toUtf8();
+                        sendMsg(socket, data, 's');
+                    }
+                    // 如果有图片或其他类型，此处需按照客户端逻辑补充
+                }
+                qDebug() << "已发送群聊历史记录";
+            } else {
+                qDebug() << "获取群聊历史失败:" << query.lastError().text();
+                sendMsg(socket, "", 'f');
+            }
         }else{
             qDebug()<<"未能识别的业务类型:"<<type;
             sendMsg(socket,"业务错误",'f');
